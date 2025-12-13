@@ -4,6 +4,21 @@ import { parseBuffer } from 'bplist-parser';
 
 const VIEW_TYPE_NOTABILITY = 'notability-view';
 
+// Helper function to create a Buffer-compatible object for mobile compatibility
+function createBufferLike(arrayBuffer: ArrayBuffer): any {
+    if (typeof Buffer !== 'undefined') {
+        // Desktop: use native Buffer
+        return Buffer.from(arrayBuffer);
+    } else {
+        // Mobile: create a Uint8Array that works with bplist-parser
+        // Since Buffer extends Uint8Array, most libraries accept Uint8Array
+        const uint8Array = new Uint8Array(arrayBuffer);
+        // Make it more Buffer-like by ensuring it has the necessary properties
+        // bplist-parser should work with Uint8Array directly
+        return uint8Array;
+    }
+}
+
 interface CurveData {
     points: Array<{ x: number; y: number }>;
     width: number;
@@ -229,7 +244,7 @@ class NotabilityView extends ItemView {
     
     parseBinaryPlist(arrayBuffer: ArrayBuffer): any {
         try {
-            const buffer = Buffer.from(arrayBuffer);
+            const buffer = createBufferLike(arrayBuffer);
             const result = parseBuffer(buffer);
             return result[0];
         } catch (error) {
@@ -345,7 +360,9 @@ class NotabilityView extends ItemView {
         
         if (data instanceof ArrayBuffer) {
             buffer = data;
-        } else if (data instanceof Buffer) {
+        } else if (data instanceof Uint8Array || (typeof Buffer !== 'undefined' && data instanceof Buffer)) {
+            // Handle both Uint8Array (mobile) and Buffer (desktop)
+            // Both have buffer, byteOffset, and byteLength properties
             buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
         } else if (typeof data === 'string') {
             const binary = atob(data);
