@@ -100,8 +100,6 @@ class NotabilityView extends ItemView {
         const arrayBuffer = await this.app.vault.readBinary(this.file);
         const noteData = await this.parseNoteFile(arrayBuffer);
         
-        console.log(`Found ${noteData.curves.length} curves`);
-        
         canvas.width = noteData.width;
         canvas.height = noteData.height;
         
@@ -207,7 +205,6 @@ class NotabilityView extends ItemView {
         
         let curveData: any = null;
         
-        // Search in objects array
         for (const obj of objects) {
             if (obj && typeof obj === 'object') {
                 if (obj.curvespoints || obj.curvesPoints || obj.CurvesPoints) {
