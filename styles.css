@@ -1,0 +1,51 @@
+.notability-view {
+  padding: 20px;
+  height: 100%;
+  overflow: auto;
+  background-color: var(--background-primary);
+}
+
+.notability-header {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin-bottom: 15px;
+  color: var(--text-normal);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notability-canvas-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  margin-top: 20px;
+}
+
+.notability-canvas {
+  /* border: 1px solid var(--background-modifier-border); */
+  background: white;
+  max-width: 100%;
+  height: auto;
+  /* box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 4px; */
+}
+
+.notability-loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+  font-size: 1.1em;
+}
+
+.notability-error {
+  padding: 20px;
+  background-color: var(--background-modifier-error);
+  color: var(--text-error);
+  border-radius: 4px;
+  margin: 20px 0;
+  border-left: 4px solid var(--text-error);
+}
+
+/* .theme-dark .notability-canvas {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+} */
