@@ -1,4 +1,4 @@
-import { Plugin, TFile, ItemView, WorkspaceLeaf } from 'obsidian';
+import { Plugin, TFile, ItemView, WorkspaceLeaf, PluginSettingTab, Setting, App } from 'obsidian';
 import JSZip from 'jszip';
 import { parseBuffer } from 'bplist-parser';
 
@@ -16,12 +16,18 @@ interface NotabilityData {
     height: number;
 }
 
+interface NotabilityPluginSettings {
+    cropToContent: boolean;
+}
+
 class NotabilityView extends ItemView {
     file: TFile | null;
+    settings: NotabilityPluginSettings;
     
-    constructor(leaf: WorkspaceLeaf) {
+    constructor(leaf: WorkspaceLeaf, settings: NotabilityPluginSettings) {
         super(leaf);
         this.file = null;
+        this.settings = settings;
     }
     
     getViewType(): string {
@@ -73,8 +79,7 @@ class NotabilityView extends ItemView {
         });
         
         const loading = container.createEl('div', {
-            cls: 'notability-loading',
-            // text: 'Loading Notability file...'
+            cls: 'notability-loading'
         });
         
         try {
@@ -100,18 +105,51 @@ class NotabilityView extends ItemView {
         const arrayBuffer = await this.app.vault.readBinary(this.file);
         const noteData = await this.parseNoteFile(arrayBuffer);
         
-        canvas.width = noteData.width;
-        canvas.height = noteData.height;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        for (const curve of noteData.curves) {
+            const halfWidth = (curve.width || 2) / 2;
+            for (const point of curve.points) {
+                minX = Math.min(minX, point.x - halfWidth);
+                minY = Math.min(minY, point.y - halfWidth);
+                maxX = Math.max(maxX, point.x + halfWidth);
+                maxY = Math.max(maxY, point.y + halfWidth);
+            }
+        }
+        
+        let cropLeft = 0;
+        let cropTop = 0;
+        let cropRight = 0;
+        let cropBottom = 0;
+        
+        if (this.settings.cropToContent) {
+            if (isFinite(minX) && isFinite(maxX)) {
+                cropLeft = Math.max(0, minX);
+                cropRight = Math.max(0, noteData.width - maxX);
+            }
+            
+            if (isFinite(minY) && isFinite(maxY)) {
+                cropTop = Math.max(0, minY);
+                cropBottom = Math.max(0, noteData.height - maxY);
+            }
+        }
+        
+        const croppedWidth = Math.max(1, noteData.width - cropLeft - cropRight);
+        const croppedHeight = Math.max(1, noteData.height - cropTop - cropBottom);
+        
+        canvas.width = croppedWidth;
+        canvas.height = croppedHeight;
         
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('Could not get canvas context');
         
-        // Enable image smoothing for better rendering quality
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.translate(-cropLeft, -cropTop);
         
         for (const curve of noteData.curves) {
             this.drawCurve(ctx, curve);
@@ -366,20 +404,80 @@ class NotabilityView extends ItemView {
         }
     }
     
+    updateSettings(settings: NotabilityPluginSettings) {
+        this.settings = settings;
+        if (this.file) {
+            this.render();
+        }
+    }
+    
     async onClose() {
     }
 }
 
+class NotabilitySettingTab extends PluginSettingTab {
+    plugin: NotabilityPlugin;
+
+    constructor(app: App, plugin: NotabilityPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        const { containerEl } = this;
+
+        containerEl.empty();
+
+        containerEl.createEl('h2', { text: 'Notability Renderer Settings' });
+
+        new Setting(containerEl)
+            .setName('Crop to Content')
+            .setDesc('Automatically crop edges to fit the drawing content')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.cropToContent)
+                .onChange(async (value) => {
+                    this.plugin.settings.cropToContent = value;
+                    await this.plugin.saveSettings();
+                    this.plugin.updateAllViews();
+                }));
+    }
+}
+
 export default class NotabilityPlugin extends Plugin {
+    settings: NotabilityPluginSettings;
+
     async onload() {
+        await this.loadSettings();
+
         this.registerView(
             VIEW_TYPE_NOTABILITY,
-            (leaf) => new NotabilityView(leaf)
+            (leaf) => new NotabilityView(leaf, this.settings)
         );
         
         this.registerExtensions(['note'], VIEW_TYPE_NOTABILITY);
+
+        this.addSettingTab(new NotabilitySettingTab(this.app, this));
     }
     
     onunload() {
+    }
+
+    async loadSettings() {
+        this.settings = Object.assign({
+            cropToContent: true
+        }, await this.loadData());
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+
+    updateAllViews() {
+        this.app.workspace.getLeavesOfType(VIEW_TYPE_NOTABILITY).forEach(leaf => {
+            const view = leaf.view as NotabilityView;
+            if (view) {
+                view.updateSettings(this.settings);
+            }
+        });
     }
 }
