@@ -108,6 +108,10 @@ class NotabilityView extends ItemView {
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('Could not get canvas context');
         
+        // Enable image smoothing for better rendering quality
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
@@ -126,19 +130,40 @@ class NotabilityView extends ItemView {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         
-        const firstPoint = curve.points[0];
-        if (firstPoint && typeof firstPoint.x === 'number' && typeof firstPoint.y === 'number') {
-            ctx.moveTo(firstPoint.x, firstPoint.y);
+        const points = curve.points.filter(
+            p => p && typeof p.x === 'number' && typeof p.y === 'number' && !isNaN(p.x) && !isNaN(p.y)
+        );
+        
+        if (points.length < 2) {
+            ctx.restore();
+            return;
+        }
+        
+        if (points.length === 2) {
+            ctx.moveTo(points[0].x, points[0].y);
+            ctx.lineTo(points[1].x, points[1].y);
+        } else {
+            ctx.moveTo(points[0].x, points[0].y);
             
-            for (let i = 1; i < curve.points.length; i++) {
-                const point = curve.points[i];
-                if (point && typeof point.x === 'number' && typeof point.y === 'number') {
-                    ctx.lineTo(point.x, point.y);
-                }
+            for (let i = 1; i < points.length - 1; i++) {
+                const prevPoint = points[i - 1];
+                const currPoint = points[i];
+                const nextPoint = points[i + 1];
+                
+                const cp1x = (prevPoint.x + currPoint.x) / 2;
+                const cp1y = (prevPoint.y + currPoint.y) / 2;
+                const cp2x = (currPoint.x + nextPoint.x) / 2;
+                const cp2y = (currPoint.y + nextPoint.y) / 2;
+                
+                ctx.quadraticCurveTo(currPoint.x, currPoint.y, cp2x, cp2y);
             }
             
-            ctx.stroke();
+            const secondLastPoint = points[points.length - 2];
+            const lastPoint = points[points.length - 1];
+            ctx.quadraticCurveTo(secondLastPoint.x, secondLastPoint.y, lastPoint.x, lastPoint.y);
         }
+        
+        ctx.stroke();
         ctx.restore();
     }
     
