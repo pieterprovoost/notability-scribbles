@@ -1,23 +1,10 @@
 import { Plugin, TFile, ItemView, WorkspaceLeaf, PluginSettingTab, Setting, App } from 'obsidian';
 import JSZip from 'jszip';
-import { parseBuffer } from 'bplist-parser';
+import { decode, PLDictionary, PLArray, PLString, PLData } from '@hqtsm/plist';
 
 const VIEW_TYPE_NOTABILITY = 'notability-view';
 
-// Helper function to create a Buffer-compatible object for mobile compatibility
-function createBufferLike(arrayBuffer: ArrayBuffer): any {
-    if (typeof Buffer !== 'undefined') {
-        // Desktop: use native Buffer
-        return Buffer.from(arrayBuffer);
-    } else {
-        // Mobile: create a Uint8Array that works with bplist-parser
-        // Since Buffer extends Uint8Array, most libraries accept Uint8Array
-        const uint8Array = new Uint8Array(arrayBuffer);
-        // Make it more Buffer-like by ensuring it has the necessary properties
-        // bplist-parser should work with Uint8Array directly
-        return uint8Array;
-    }
-}
+// Note: @hqtsm/plist is a zero-dependency browser-compatible parser that works with ArrayBuffer
 
 interface CurveData {
     points: Array<{ x: number; y: number }>;
@@ -69,11 +56,11 @@ class NotabilityView extends ItemView {
         //     }
         // }
         
-        if (!this.file) {
-            return;
-        }
+        // if (!this.file) {
+        //     return;
+        // }
         
-        await this.render();
+        // await this.render();
     }
     
     async render() {
@@ -114,8 +101,6 @@ class NotabilityView extends ItemView {
         if (!this.file) {
             throw new Error('No file available to render');
         }
-        
-        console.log(`Rendering file: ${this.file.path}`);
         
         const arrayBuffer = await this.app.vault.readBinary(this.file);
         const noteData = await this.parseNoteFile(arrayBuffer);
@@ -242,53 +227,141 @@ class NotabilityView extends ItemView {
         return this.extractCurveData(plistObj);
     }
     
+    plistToPlain(plistValue: any): any {
+        if (!plistValue) return plistValue;
+        
+        if (plistValue.type === 'PLData' || plistValue.constructor?.name === 'PLData' || 
+            (plistValue[Symbol.toStringTag] === 'PLData')) {
+            if (plistValue.buffer) {
+                return plistValue.buffer;
+            }
+            return plistValue.data || plistValue;
+        }
+        
+        if (plistValue instanceof PLDictionary || (plistValue.type === 'PLDictionary') ||
+            (plistValue[Symbol.toStringTag] === 'PLDictionary')) {
+            const result: any = {};
+            for (const [key, value] of plistValue) {
+                const keyStr = this.plistToPlain(key);
+                result[keyStr] = this.plistToPlain(value);
+            }
+            return result;
+        }
+        
+        if (plistValue instanceof Array || (plistValue.type === 'PLArray') ||
+            (plistValue[Symbol.toStringTag] === 'PLArray')) {
+            return Array.from(plistValue).map(item => this.plistToPlain(item));
+        }
+        
+        if (plistValue.value !== undefined && typeof plistValue.value !== 'object') {
+            return plistValue.value;
+        }
+        
+        if (typeof plistValue !== 'object' || plistValue === null) {
+            return plistValue;
+        }
+        
+        const tag = plistValue[Symbol.toStringTag];
+        if (tag && tag.startsWith('PL')) {
+            if (plistValue.data !== undefined) {
+                return plistValue.data;
+            }
+            if (plistValue.value !== undefined) {
+                return plistValue.value;
+            }
+        }
+        
+        if (plistValue[Symbol.iterator]) {
+            const result: any = {};
+            try {
+                for (const [key, value] of plistValue) {
+                    const keyStr = this.plistToPlain(key);
+                    result[keyStr] = this.plistToPlain(value);
+                }
+                return result;
+            } catch (e) {
+                try {
+                    return Array.from(plistValue).map(item => this.plistToPlain(item));
+                } catch (e2) {
+                }
+            }
+        }
+        
+        return plistValue;
+    }
+    
     parseBinaryPlist(arrayBuffer: ArrayBuffer): any {
         try {
-            const buffer = createBufferLike(arrayBuffer);
-            const result = parseBuffer(buffer);
-            return result[0];
+            const result = decode(arrayBuffer);
+            
+            if (!result || !result.plist) {
+                throw new Error('Decode returned empty result');
+            }
+            
+            const plainObject = this.plistToPlain(result.plist);
+            
+            if (!plainObject) {
+                throw new Error('Conversion returned empty object');
+            }
+            
+            return plainObject;
         } catch (error) {
             console.error('Error parsing binary plist:', error);
+            console.error('Error stack:', error.stack);
             throw new Error(`Could not parse plist file: ${error.message}`);
         }
     }
     
     extractCurveData(plistObj: any): NotabilityData {
-        const objects = plistObj.$objects || plistObj.objects || [];
-        
-        let curveData: any = null;
-        
-        for (const obj of objects) {
-            if (obj && typeof obj === 'object') {
-                if (obj.curvespoints || obj.curvesPoints || obj.CurvesPoints) {
-                    curveData = obj;
-                    break;
-                }
-            }
+        if (!plistObj || typeof plistObj !== 'object') {
+            throw new Error('Invalid plist object');
         }
         
-        // if (!curveData) {
-        //     const searchForCurveData = (obj: any, depth: number = 0): any => {
-        //         if (depth > 10) return null;
-        //         if (!obj || typeof obj !== 'object') return null;
-                
-        //         if (obj.curvespoints || obj.curvesPoints || obj.CurvesPoints) {
-        //             return obj;
-        //         }
-                
-        //         for (const key in obj) {
-        //             if (obj.hasOwnProperty(key)) {
-        //                 const result = searchForCurveData(obj[key], depth + 1);
-        //                 if (result) return result;
-        //             }
-        //         }
-        //         return null;
-        //     };
+        const searchForCurveData = (obj: any, depth: number = 0, visited: Set<any> = new Set()): any => {
+            if (depth > 15) return null; // Prevent infinite recursion
+            if (!obj || typeof obj !== 'object') return null;
             
-        //     curveData = searchForCurveData(plistObj);
-        // }
+            if (visited.has(obj)) return null;
+            visited.add(obj);
+            
+            if (obj.curvespoints || obj.curvesPoints || obj.CurvesPoints) {
+                return obj;
+            }
+            
+            if (Array.isArray(obj)) {
+                for (const item of obj) {
+                    const result = searchForCurveData(item, depth + 1, visited);
+                    if (result) return result;
+                }
+                return null;
+            }
+            
+            for (const key in obj) {
+                if (obj.hasOwnProperty(key)) {
+                    const result = searchForCurveData(obj[key], depth + 1, visited);
+                    if (result) return result;
+                }
+            }
+            return null;
+        };
+        
+        const curveData = searchForCurveData(plistObj);
         
         if (!curveData) {
+            try {
+                const sample = JSON.stringify(plistObj, (key, value) => {
+                    if (typeof value === 'object' && value !== null) {
+                        const keys = Object.keys(value);
+                        if (keys.length > 10) {
+                            return `[Object with ${keys.length} keys: ${keys.slice(0, 5).join(', ')}...]`;
+                        }
+                    }
+                    return value;
+                }, 2).substring(0, 2000);
+                console.error('Plist structure sample:', sample);
+            } catch (e) {
+                console.error('Could not stringify plist structure');
+            }
             throw new Error('No curve data found in plist');
         }
         
@@ -361,8 +434,6 @@ class NotabilityView extends ItemView {
         if (data instanceof ArrayBuffer) {
             buffer = data;
         } else if (data instanceof Uint8Array || (typeof Buffer !== 'undefined' && data instanceof Buffer)) {
-            // Handle both Uint8Array (mobile) and Buffer (desktop)
-            // Both have buffer, byteOffset, and byteLength properties
             buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
         } else if (typeof data === 'string') {
             const binary = atob(data);

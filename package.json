@@ -28,6 +28,6 @@
   },
   "dependencies": {
     "jszip": "^3.10.1",
-    "bplist-parser": "^0.3.2"
+    "@hqtsm/plist": "^1.0.0"
   }
 }
